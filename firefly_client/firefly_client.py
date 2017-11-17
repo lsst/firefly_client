@@ -88,7 +88,7 @@ class FireflyClient(WebSocketClient):
                 'Cell': 0, 'Histogram': 0, 'Plotly': 0}
 
     # urls:
-    # launch browser:  http://<host>/<basedir>/;wsch=<channel id> or (mode == 'full')
+    # launch browser:  http://<host>/<basedir>/?__wsch=<channel id> or (mode == 'full')
     #                  http://<host>/<basedir>/;id=Loader&channelID=<channel id>
     # dispatch action: http://<host>/<basedir>/sticky/CmdSrv?channelID=<channel id>
     #                  &cmd=pushAction&Action=<ACTION_DICT>
@@ -97,20 +97,26 @@ class FireflyClient(WebSocketClient):
     def __init__(self, host=_my_localhost, channel=None, basedir='firefly', html_file=None):
         self._basedir = basedir
         self._fftools_cmd = '/%s/sticky/CmdSrv' % self._basedir
+        use_ssl = False
+        protocol = 'http'
+        wsproto = 'ws'
         if host.startswith('http://'):
             host = host[7:]
-
+        if host.startswith('https://'):
+            host = host[8:]
+            protocol = 'https'
+            wsproto = 'wss'
+            use_ssl = True
         self.this_host = host
 
-        url = 'ws://%s/%s/sticky/firefly/events' % (host, self._basedir)  # web socket url
+        url = '%s://%s/%s/sticky/firefly/events' % (wsproto, host, self._basedir)  # web socket url
         if channel:
             url += '?channelID=%s' % channel
         WebSocketClient.__init__(self, url)
 
-        self.url_root = 'http://' + host + self._fftools_cmd
+        self.url_root = protocol + '://' + host + self._fftools_cmd
         self.html_file = ('/'+html_file) if html_file else ''
-        self.url_bw = 'http://' + self.this_host + '/%s%s;wsch=' % (self._basedir, self.html_file)
-
+        self.url_bw = protocol + '://' + self.this_host + '/%s%s?__wsch=' % (self._basedir, self.html_file)
         self.listeners = {}
         self.channel = channel
         self.session = requests.Session()
@@ -262,7 +268,7 @@ class FireflyClient(WebSocketClient):
         if not channel:
             channel = self.channel
 
-        url = 'http://%s/%s%s?id=Loader&channelID=' % (self.this_host, self._basedir, self.html_file)
+        url = 'http://%s/%s%s?id=Loader&__wsch=' % (self.this_host, self._basedir, self.html_file)
         if mode.lower() == "full":
             url = self.url_bw
 
@@ -915,9 +921,18 @@ class FireflyClient(WebSocketClient):
 
         return self.dispatch_remote_action_by_post(self.channel, FireflyClient.ACTION_DICT['ShowXYPlot'], payload)
 
-    def show_plot(self, group_id=None, **chart_params):
+    def show_chart(self, group_id=None, **chart_params):
         """
-        Show a plot by using plot.ly charts
+        Show a plot.ly chart
+
+        Plotly chart is described by a list of trace data and a layout. Any list in trace data can come from a table.
+
+        For example, if a trace is defined by *{'tbl_id': 'wise', 'x': 'tables::w1mpro', 'y': 'tables::w2mpro' }*,
+        *x* and *y* points of the trace will come from *w1mpro* and *w2mpro* columns of the table with the id *wise*.
+
+        See `plotly.js attribute reference <https://plot.ly/javascript/reference/>`_
+        for the supported trace types and attributes. Note, that *data* and *layout* are expected to be
+        basic Python object hierarchies, as *json.dumps* is used to convert them to JSON.
 
         Parameters
         ----------
@@ -930,13 +945,9 @@ class FireflyClient(WebSocketClient):
             **chartId**: `str`, optional
                 The chart ID.
             **data**: `list` of `dict`, optional
-                An array of data for all traces of the plot.ly chart.
-            **fireflyData**: `list` of `dict`, optional
-                This array contains the information for creating a table and the table has data for chart rendering.
-            **layout**: 'dict', optional
-                The layout for plot.ly layout.
-            **fireflyLayout** : `dict`, optional
-                The layout contains information to be processed by Firefly.
+                A list of data for all traces of the plot.ly chart. Firefly-specific keys: *tbl_id*, *firefly* (for Firefly chart types).
+            **layout**: `dict`, optional
+                The layout for plot.ly layout. Optional *firefly* key refers to the information processed by Firefly.
 
         Returns
         -------
@@ -954,7 +965,7 @@ class FireflyClient(WebSocketClient):
                    'chartType': 'plot.ly',
                    'closable': True}
 
-        for item in ['data', 'fireflyData', 'layout', 'fireflyLayout']:
+        for item in ['data', 'layout']:
             if item in chart_params:
                 payload.update({item: chart_params.get(item)})
 
