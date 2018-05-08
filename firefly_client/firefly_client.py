@@ -81,12 +81,14 @@ class FireflyClient(WebSocketClient):
         'AddCell': 'layout.addCell',
         'ShowCoverage': 'layout.enableSpecialViewer',
         'ShowImageMetaData': 'layout.enableSpecialViewer',
-        'ReinitViewer': 'app_data.reinitApp'}
+        'ReinitViewer': 'app_data.reinitApp',
+        'ShowHiPS': 'ImagePlotCntlr.PlotHiPS',
+        'ShowImageOrHiPS': 'ImagePlotCntlr.plotHiPSOrImage'}
     """Definition of Firefly action (`dict`)."""
 
     # id for table, region layer, extension
     _item_id = {'Table': 0, 'RegionLayer': 0, 'Extension': 0, 'MaskLayer': 0, 'XYPlot': 0,
-                'Cell': 0, 'Histogram': 0, 'Plotly': 0}
+                'Cell': 0, 'Histogram': 0, 'Plotly': 0, 'Image': 0}
 
     # urls:
     # launch browser:  http://<host>/<basedir>/?__wsch=<channel id> or (mode == 'full')
@@ -98,7 +100,7 @@ class FireflyClient(WebSocketClient):
     def __init__(self, host=_my_localhost, channel=None, basedir='firefly', html_file=None):
         self._basedir = basedir
         self._fftools_cmd = '/%s/sticky/CmdSrv' % self._basedir
-        use_ssl = False
+
         protocol = 'http'
         wsproto = 'ws'
         if host.startswith('http://'):
@@ -107,7 +109,7 @@ class FireflyClient(WebSocketClient):
             host = host[8:]
             protocol = 'https'
             wsproto = 'wss'
-            use_ssl = True
+
         self.this_host = host
 
         url = '%s://%s/%s/sticky/firefly/events' % (wsproto, host, self._basedir)  # web socket url
@@ -122,7 +124,7 @@ class FireflyClient(WebSocketClient):
         self.url_bw = protocol + '://' + self.this_host + '/%s%s?__wsch=' % (self._basedir, self.html_file)
         self.listeners = {}
         self.channel = channel
-        self.headers = {'FF-channel':channel}
+        self.headers = {'FF-channel': channel}
         self.session = requests.Session()
         self.connect()
 
@@ -301,13 +303,15 @@ class FireflyClient(WebSocketClient):
             channel = self.channel
         if not url:
             url = self.url_bw
+
         do_open = True if force else not self._is_page_connected()
+        url = self.get_firefly_url(url, channel)
 
         if do_open:
-            webbrowser.open(self.get_firefly_url(url, channel))
+            webbrowser.open(url)
 
         time.sleep(5)  # todo: find something better to do than sleeping
-        return channel
+        return url
 
     def stay_connected(self):
         """Keep WebSocket connected.
@@ -551,9 +555,7 @@ class FireflyClient(WebSocketClient):
         """
 
         payload = {}
-
-        r = self.dispatch_remote_action_by_post(self.channel, FireflyClient.ACTION_DICT['ReinitViewer'], payload)
-        return r
+        return self.dispatch_remote_action_by_post(self.channel, FireflyClient.ACTION_DICT['ReinitViewer'], payload)
 
     def show_fits(self, file_on_server=None, plot_id=None, viewer_id=None, **additional_params):
         """
@@ -574,7 +576,7 @@ class FireflyClient(WebSocketClient):
         \*\*additional_params : optional keyword arguments
             Any valid fits viewer plotting parameter, please see the details in `fits plotting parameters`_.
 
-            .. _fits plotting parameters: https://github.com/Caltech-IPAC/firefly/blob/dev/docs/fits-plotting-parameters.md
+            .. _fits plotting parameters:https://github.com/Caltech-IPAC/firefly/blob/dev/docs/fits-plotting-parameters.md
 
             More options are shown as below:
 
@@ -647,7 +649,7 @@ class FireflyClient(WebSocketClient):
         return self.dispatch_remote_action_by_post(self.channel, FireflyClient.ACTION_DICT['ShowFits'], payload)
 
     def show_table(self, file_on_server=None, tbl_id=None, title=None, page_size=100, is_catalog=True,
-                   meta=None, target_search_info=None, options=None):
+                   meta=None, target_search_info=None, options=None, table_index=None):
         """
         Show a table.
 
@@ -702,6 +704,10 @@ class FireflyClient(WebSocketClient):
                 if table shows units for the columns.
             **showFilters** : `bool`
                 if table shows filter button
+        table_index : `int`, optional
+            The table to be shown in case `file_on_server` contains multiple tables. It is the extension number for
+            a FITS file or the table index for a VOTable file. In unspeficied, the server will fetch extension 1 from
+            a FITS file or the table at index 0 from a VOTable file.
 
         Returns
         -------
@@ -725,6 +731,8 @@ class FireflyClient(WebSocketClient):
             tbl_type = 'table' if not is_catalog else 'catalog'
             tbl_req.update({'source': file_on_server, 'tblType': tbl_type,
                             'id': 'IpacTableFromSource'})
+            if table_index:
+                tbl_req.update({'tbl_index': table_index})
         elif target_search_info:
             target_search_info.update(
                     {'use': target_search_info.get('use') if 'use' in target_search_info else 'catalog_overlay'})
@@ -739,7 +747,7 @@ class FireflyClient(WebSocketClient):
 
         return self.dispatch_remote_action_by_post(self.channel, FireflyClient.ACTION_DICT['ShowTable'], payload)
 
-    def fetch_table(self, file_on_server, tbl_id=None, page_size=1):
+    def fetch_table(self, file_on_server, tbl_id=None, page_size=1, table_index=None):
         """
         Fetch table data without showing them
 
@@ -753,6 +761,10 @@ class FireflyClient(WebSocketClient):
             A table ID. It will be created automatically if not specified.
         page_size : `int`, optional
             The number of rows to fetch.
+        table_index : `int`, optional
+            The table to be fetched in case `file_on_server` contains multiple tables. It is the extension number for
+            a FITS file or the table index for a VOTable file. In unspeficied, the server will fetch extension 1 from
+            a FITS file or the table at index 0 from a VOTable file.
 
         Returns
         -------
@@ -764,6 +776,9 @@ class FireflyClient(WebSocketClient):
             tbl_id = FireflyClient._gen_item_id('Table')
         tbl_req = {'startIdx': 0, 'pageSize': page_size, 'source': file_on_server,
                    'id': 'IpacTableFromSource', 'tbl_id': tbl_id}
+        if table_index:
+            tbl_req.update({'tbl_index': table_index})
+
         meta_info = {'title': tbl_id, 'tbl_id': tbl_id}
         tbl_req.update({'META_INFO': meta_info})
         payload = {'request': tbl_req, 'hlRowIdx': 0}
@@ -946,7 +961,8 @@ class FireflyClient(WebSocketClient):
             **chartId**: `str`, optional
                 The chart ID.
             **data**: `list` of `dict`, optional
-                A list of data for all traces of the plot.ly chart. Firefly-specific keys: *tbl_id*, *firefly* (for Firefly chart types).
+                A list of data for all traces of the plot.ly chart. Firefly-specific keys: *tbl_id*,
+                *firefly* (for Firefly chart types).
             **layout**: `dict`, optional
                 The layout for plot.ly layout. Optional *firefly* key refers to the information processed by Firefly.
 
@@ -1062,6 +1078,125 @@ class FireflyClient(WebSocketClient):
                      'title': title, 'extType': ext_type, 'toolTip': tool_tip}
         payload = {'extension': extension}
         return self.dispatch_remote_action_by_post(self.channel, FireflyClient.ACTION_DICT['AddExtension'],
+                                                   payload)
+
+    def show_hips(self, plot_id=None, viewer_id=None, hips_root_url=None, hips_image_conversion=None,
+                  **additional_params):
+        """
+        Show HiPS image.
+
+        Parameters
+        ----------
+        plot_id : `str`, optional
+            The ID you assign to the image plot. This is necessary to further control the plot.
+        viewer_id : `str`, optional
+            The ID you assign to the viewer (or cell) used to contain the image plot. If grid view is
+            used for display, the viewer id is the cell id of the cell which contains the image plot.
+        hips_root_url : `str`
+            HiPS access URL
+        hips_image_conversion: `dict`, optional
+            The info used to convert between image and HiPS
+        \*\*additional_params : optional keyword arguments
+            parameters for HiPS viewer plotting, the options are shown as below:
+
+            **WorldPt** : `str`, optional
+                World point as the center of the HiPS, if not defined, then get it from HiPS properties or
+                set as the origin of the celestial coordinates.
+            **Title** : `str`, optional
+                Title to display with the HiPS.
+            **SizeInDeg** : `int` or `float`, optional
+                Field of view for HiPS.
+
+        Returns
+        -------
+        out : `dict`
+            Status of the request, like {'success': True}.
+        """
+
+        if not hips_root_url:
+            return
+
+        wp_request = {'plotGroupId': 'groupFromPython',
+                      'hipsRootUrl': hips_root_url}
+        if additional_params:
+            wp_request.update(additional_params)
+
+        payload = {'wpRequest': wp_request}
+
+        if not plot_id:
+            plot_id = FireflyClient._gen_item_id('Image')
+
+        payload.update({'plotId': plot_id})
+        wp_request.update({'plotId': plot_id})
+
+        if not viewer_id:
+            viewer_id = 'DEFAULT_FITS_VIEWER_ID'
+
+        payload.update({'viewerId': viewer_id})
+
+        if hips_image_conversion and type(hips_image_conversion) is dict:
+            payload.update({'hipsImageConversion': hips_image_conversion})
+
+        return self.dispatch_remote_action_by_post(self.channel, FireflyClient.ACTION_DICT['ShowHiPS'],
+                                                   payload)
+
+    def show_image_or_hips(self, plot_id=None, viewer_id=None, image_request=None, hips_request=None,
+                           fov_deg_fallover=0.12, allsky_request=None, plot_allsky_first=False):
+
+        """
+        Show a FiTS or HiPS image.
+
+        Parameters
+        ----------
+        plot_id : `str`, optional
+            The ID you assign to the image plot. This is necessary to further control the plot.
+        viewer_id : `str`, optional
+            The ID you assign to the viewer (or cell) used to contain the image plot. If grid view is
+            used for display, the viewer id is the cell id of the cell which contains the image plot.
+        image_request : `dict`, optional
+            Request with fits plotting parameters. For valid fits viewer plotting parameter, please see the
+            the description of `show_fits` or `show_fits_3color`.
+        hips_request : `dict`, optional
+            Request with hips plotting parameters. For valid HiPS viewer plotting paramter, please see the
+            description of `show_hips`.
+        fov_deg_fallover : `float`, optional
+            The size in degrees that the image will switch between hips and a image cutout.
+        allsky_request : `dict`, optional
+             Allsky type request, like {'Type': 'ALL_SKY'}
+        plot_allsky_first : `bool`, optional
+             Plot all sky first If there is an all sky set up.
+        Returns
+        -------
+        out : `dict`
+            Status of the request, like {'success': True}.
+        """
+
+        if not image_request and not hips_request:
+            return
+
+        if not plot_id:
+            plot_id = FireflyClient._gen_item_id('Image')
+        if not viewer_id:
+            viewer_id = 'DEFAULT_FITS_VIEWER_ID'
+
+        payload = {'fovDegFallOver': fov_deg_fallover, 'plotAllSkyFirst': plot_allsky_first,
+                   'plotId': plot_id, 'viewerId': viewer_id}
+
+        pg_key = 'plotGroupId'
+        if not ((hips_request and hips_request.get(pg_key)) or (image_request and image_request.get(pg_key))):
+            if hips_request:
+                hips_request.update({pg_key: 'groupFromPython'})
+            elif image_request:
+                    image_request.update({pg_key: 'groupFromPython'})
+
+        if image_request:
+            payload.update({'imageRequest': image_request})
+        if hips_request:
+            payload.update({'hipsRequest': hips_request})
+        if allsky_request:
+            payload.update({'allSkyRequest': allsky_request})
+
+        return self.dispatch_remote_action_by_post(self.channel, FireflyClient.ACTION_DICT['ShowImageOrHiPS'],
                                                    payload)
 
     # ----------------------------
