@@ -26,7 +26,9 @@ __docformat__ = 'restructuredtext'
 
 _my_localurl = 'http://localhost:8080/firefly'
 
-if 'FIREFLY_URL' in os.environ:
+if 'fireflyLabExtension' in os.environ:
+    _my_url = os.environ['fireflyURLLab']
+elif 'FIREFLY_URL' in os.environ:
     _my_url = os.environ['FIREFLY_URL']
 else:
     _my_url = _my_localurl
@@ -102,12 +104,13 @@ class FireflyClient(WebSocketClient):
         'ShowImageMetaData': 'layout.enableSpecialViewer',
         'ReinitViewer': 'app_data.reinitApp',
         'ShowHiPS': 'ImagePlotCntlr.PlotHiPS',
-        'ShowImageOrHiPS': 'ImagePlotCntlr.plotHiPSOrImage'}
+        'ShowImageOrHiPS': 'ImagePlotCntlr.plotHiPSOrImage',
+        'ImagelineBasedFootprint': 'DrawLayerCntlr.ImageLineBasedFP.imagelineBasedFPCreate'}
     """Definition of Firefly action (`dict`)."""
 
     # id for table, region layer, extension
     _item_id = {'Table': 0, 'RegionLayer': 0, 'Extension': 0, 'MaskLayer': 0, 'XYPlot': 0,
-                'Cell': 0, 'Histogram': 0, 'Plotly': 0, 'Image': 0}
+                'Cell': 0, 'Histogram': 0, 'Plotly': 0, 'Image': 0, 'FootprintLayer': 0}
 
     # Keep track of instances.
     instances = []
@@ -127,7 +130,10 @@ class FireflyClient(WebSocketClient):
 
         # auto-generate unique channel if not provided
         if channel is None:
-            channel = str(uuid.uuid1())
+            if 'fireflyLabExtension' in os.environ:
+                channel = os.environ['fireflyChannelLab']
+            else:
+                channel = str(uuid.uuid1())
 
         # websocket url
         ws_url = '%s://%s/sticky/firefly/events' % (wsproto, location)  # web socket url
@@ -732,7 +738,8 @@ class FireflyClient(WebSocketClient):
         return self.dispatch_remote_action_by_post(self.channel, FireflyClient.ACTION_DICT['ShowFits'], payload)
 
     def show_table(self, file_on_server=None, tbl_id=None, title=None, page_size=100, is_catalog=True,
-                   meta=None, target_search_info=None, options=None, table_index=None):
+                   meta=None, target_search_info=None, options=None, table_index=None,
+                   column_spec = None, filters=None):
         """
         Show a table.
 
@@ -791,6 +798,13 @@ class FireflyClient(WebSocketClient):
             The table to be shown in case `file_on_server` contains multiple tables. It is the extension number for
             a FITS file or the table index for a VOTable file. In unspeficied, the server will fetch extension 1 from
             a FITS file or the table at index 0 from a VOTable file.
+        column_spec : `str`, optional
+            A string specifying column names from the table that will be shown. Column
+            names must appear in the string in quotes, eg. '"ra","dec","mag"'
+            It is possible to derive columns, e.g. '"flux"/"flux_err" as "SNR"'
+        filters : `str`, optional
+            A string specifying filters. Column names must be quoted.
+            For example, '("coord_dec" > -0.478) and ("parent" > 0)'.
 
         Returns
         -------
@@ -826,6 +840,10 @@ class FireflyClient(WebSocketClient):
         tbl_req.update({'META_INFO': meta_info})
         if options:
             tbl_req.update({'options': options})
+        if column_spec:
+            tbl_req.update({'inclCols':column_spec})
+        if filters:
+            tbl_req.update({'filters': filters})
         payload = {'request': tbl_req}
 
         return self.dispatch_remote_action_by_post(self.channel, FireflyClient.ACTION_DICT['ShowTable'], payload)
@@ -1454,6 +1472,74 @@ class FireflyClient(WebSocketClient):
         return rvstring
 
     # -----------------------------------------------------------------
+    # image line based footprint overlay
+    # -----------------------------------------------------------------
+    def overlay_footprints(self, footprint_file, footprint_image=None, title=None,
+                            footprint_layer_id=None, plot_id=None, table_index=None, **additional_params):
+        """
+        Overlay a footprint dictionary on displayed images.
+        The dictionary must be convertible to JSON format.
+
+        Parameters
+        ----------
+        footprint_file : `str`
+            footprint file with a table containing measurements and footprints
+        footprint_image: `str`
+            footprint image file
+        title : `str`, optional
+            Title of the footprint layer.
+        footprint_layer_id : `str`, optional
+            ID of the footprint layer to be created. It is automatically created if not specified.
+        plot_id : `str` or `list` of `str`, optional
+            ID of the plot that the footprint layer is created on.
+            If None,  then overlay the footprint on all plots in the same group of the active plot.
+        table_index : `int`, optional
+            The table to be shown in case `file_on_server` contains multiple tables. It is the extension number for
+            a FITS file or the table index for a VOTable file. In unspeficied, the server will fetch extension 1 from
+            a FITS file or the table at index 0 from a VOTable file.
+
+        **additional_params : optional keyword arguments
+            parameters for footprint overlays, the options are shown as below:
+
+            **color** : `str`, optional
+                color for the footprint. it is color name like 'red' or color code like 'rgb(0,0,0)'
+            **style** : `str`, optional
+                footprint display style, 'outline' or 'fill'
+            **showText** : `bool`, optional
+                show text, footprint id if there is, by the 'outline' display
+            **selectColor** : 'str`, optional
+                color for selected footprint
+            **highlightColor** : `str` optional
+                color for highlighted footprint
+
+        Returns
+        -------
+        out : `dict`
+            Status of the request, like {'success': True}.
+        """
+
+        if not footprint_layer_id:
+            footprint_layer_id = FireflyClient._gen_item_id('FootprintLayer')
+        payload = {'drawLayerId': footprint_layer_id}
+
+        if title:
+            payload.update({'title': title})
+        if plot_id:
+            payload.update({'plotId': plot_id})
+        if footprint_file:
+            payload.update({'footprintFile': footprint_file})
+        if footprint_image:
+            payload.update({'footprintImageFile': footprint_image})
+        if table_index:
+            payload.update({'tbl_index': table_index})
+
+        if additional_params:
+            payload.update(additional_params)
+
+        return self.dispatch_remote_action_by_post(
+                self.channel, FireflyClient.ACTION_DICT['ImagelineBasedFootprint'], payload)
+
+    # -----------------------------------------------------------------
     # Region Stuff
     # -----------------------------------------------------------------
 
@@ -1766,7 +1852,7 @@ class FireflyClient(WebSocketClient):
 
         Parameters
         ----------
-        item : {'Table', 'RegionLayer', 'Extension', 'XYPlot', 'Cell'}
+        item : {'Table', 'RegionLayer', 'Extension', 'XYPlot', 'Cell', 'FootprintLayer'}
             Entity type.
 
         Returns
