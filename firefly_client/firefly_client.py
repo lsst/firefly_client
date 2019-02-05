@@ -305,14 +305,14 @@ class FireflyClient(WebSocketClient):
 
         if ('fireflyLabExtension' in os.environ) and use_lab_env \
                 and (not channel_matches or not url_matches):
-                print('Cannot use Jupyter lab environment: channel or url differ from default lab environment setup.')
-                if not url_matches:
-                    print('>>> Default URL: %s, Passed URL, %s' % (_my_url, url))
-                if not channel_matches:
-                    print('>>> Default channel: %s, Passed channel, %s' % (os.environ['fireflyChannelLab'], channel))
-                print('To disable this message pass False to use_lab_env')
-                use_lab_env = False
-                start_tab = False
+            print('Cannot use Jupyter lab environment: channel or url differ from default lab environment setup.')
+            if not url_matches:
+                print('>>> Default URL: %s, Passed URL, %s' % (_my_url, url))
+            if not channel_matches:
+                print('>>> Default channel: %s, Passed channel, %s' % (os.environ['fireflyChannelLab'], channel))
+            print('To disable this message pass False to use_lab_env')
+            use_lab_env = False
+            start_tab = False
 
         if ('fireflyLabExtension' in os.environ) and use_lab_env:
             self.render_tree_id = 'slateClient-%s-%s' % (FireflyClient._instance_cnt, round(time.time()))
@@ -1441,7 +1441,7 @@ class FireflyClient(WebSocketClient):
             if hips_request:
                 hips_request.update({pg_key: 'groupFromPython'})
             elif image_request:
-                    image_request.update({pg_key: 'groupFromPython'})
+                image_request.update({pg_key: 'groupFromPython'})
 
         if image_request:
             payload.update({'imageRequest': image_request})
