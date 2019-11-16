@@ -4,9 +4,6 @@ Module of firefly_client.py
 This module defines class 'FireflyClient' and methods to remotely communicate to Firefly viewer
 by dispatching remote actions.
 """
-from __future__ import print_function
-from future import standard_library
-from builtins import str
 from ws4py.client.threadedclient import WebSocketClient
 from ws4py.client import HandshakeError
 import os
@@ -1587,7 +1584,7 @@ class FireflyClient(WebSocketClient):
             serialized_rv = self._create_rangevalues_zscale(algorithm, **additional_params)
         elif stype and (stype.lower() in ['minmax', 'maxmin']):
             # 'maxmin' retained for backwards compatibility
-            serialized_rv = self._create_rangevalues_standard(algorithm, 'percent', 
+            serialized_rv = self._create_rangevalues_standard(algorithm, 'percent',
                                                               lower_value=0, upper_value=100, **additional_params)
         else:
             serialized_rv = self._create_rangevalues_standard(algorithm, stype, **additional_params)
